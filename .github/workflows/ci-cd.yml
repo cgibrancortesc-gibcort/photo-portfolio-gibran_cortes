@@ -1,0 +1,101 @@
+name: CI/CD
+
+# CUÁNDO corre
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Mínimo privilegio para el token de GitHub
+permissions:
+  contents: read
+
+# Nunca dos despliegues a la vez; en PRs se cancela la ejecución vieja
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Un solo job: se construye una vez y se despliega exactamente eso
+  sitio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # ---------- CI: se ejecuta siempre ----------
+      - name: Validar fotos
+        run: |
+          pip install -r requirements.txt
+          python scripts/check_fotos.py
+
+      - name: Instalar dependencias (versiones exactas del lockfile)
+        run: npm ci
+
+      - name: Construir
+        run: npm run build
+
+      # ---------- Vista previa: solo PRs de este mismo repo ----------
+      - name: Publicar vista previa
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: versions upload --preview-alias pr-${{ github.event.number }}
+
+      # ---------- CD: solo en main ----------
+      # Se anota la versión activa ANTES de desplegar. "La anterior" podría ser
+      # una vista previa de un PR, por eso se hace rollback a un ID concreto.
+      - name: Anotar versión en producción
+        id: previa
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          ID=$(npx wrangler deployments status --json |
+            python3 -c 'import json,sys; v=json.load(sys.stdin)["versions"]; print(max(v, key=lambda x: x["percentage"])["version_id"])') || ID=""
+          if [ -z "$ID" ]; then
+            echo "::warning::No pude leer la versión activa; no habrá rollback automático"
+          fi
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+
+      - name: Desplegar a producción
+        id: deploy
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
+
+      - name: Smoke test
+        id: smoke
+        if: steps.deploy.outcome == 'success'
+        env:
+          URL: ${{ vars.SITE_URL || steps.deploy.outputs.deployment-url }}
+        run: python scripts/smoke_test.py "$URL" --sha "$GITHUB_SHA"
+
+      - name: Rollback
+        if: failure() && steps.smoke.outcome == 'failure' && steps.previa.outputs.id != ''
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >-
+            rollback ${{ steps.previa.outputs.id }}
+            --message "Smoke test fallido en ${{ github.sha }}"

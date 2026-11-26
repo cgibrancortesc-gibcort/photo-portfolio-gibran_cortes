@@ -1,0 +1,15 @@
+---
+import Base from '../layouts/Base.astro';
+import Galeria from '../components/Galeria.astro';
+import { secciones } from '../data/sitio';
+
+export function getStaticPaths() {
+  return secciones.map((s) => ({ params: { seccion: s.slug }, props: s }));
+}
+
+const { slug, titulo } = Astro.props;
+---
+<Base titulo={titulo}>
+  <h1>{titulo}</h1>
+  <Galeria slug={slug} titulo={titulo} />
+</Base>
