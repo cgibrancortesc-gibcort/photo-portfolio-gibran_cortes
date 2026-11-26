@@ -1,0 +1,10 @@
+---
+import Base from '../layouts/Base.astro';
+import { sitio, secciones } from '../data/sitio';
+---
+<Base>
+  <h1>{sitio.lema}</h1>
+  <ul>
+    {secciones.map((s) => <li><a href={`/${s.slug}/`}>{s.titulo}</a></li>)}
+  </ul>
+</Base>

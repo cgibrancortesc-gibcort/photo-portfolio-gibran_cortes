@@ -1,0 +1,41 @@
+---
+import { sitio, secciones } from '../data/sitio';
+
+interface Props { titulo?: string }
+const { titulo } = Astro.props;
+// Commit desplegado; el smoke test lo usa para confirmar la versión publicada.
+const version = process.env.GITHUB_SHA ?? 'local';
+---
+<!doctype html>
+<html lang="es-MX">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="version" content={version} />
+    <meta name="description" content={sitio.lema} />
+    <title>{titulo ? `${titulo} · ${sitio.nombre}` : sitio.nombre}</title>
+  </head>
+  <body>
+    <header>
+      <a class="marca" href="/">{sitio.nombre}</a>
+      <nav>
+        {secciones.map((s) => <a href={`/${s.slug}/`}>{s.titulo}</a>)}
+      </nav>
+    </header>
+    <main><slot /></main>
+    <footer>© {new Date().getFullYear()} {sitio.nombre}</footer>
+  </body>
+</html>
+
+<style is:global>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #111; color: #eee; font: 16px/1.6 system-ui, sans-serif; }
+  header, main, footer { max-width: 72rem; margin: 0 auto; padding: 1rem; }
+  header { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: space-between; }
+  nav { display: flex; flex-wrap: wrap; gap: 1rem; }
+  a { color: inherit; text-underline-offset: 4px; }
+  header a { text-decoration: none; }
+  header a:hover { text-decoration: underline; }
+  .marca { font-weight: 700; }
+  footer { color: #999; font-size: .85rem; }
+</style>
